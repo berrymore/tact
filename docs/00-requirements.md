@@ -51,7 +51,7 @@ stretch goal (OQ-4).
 
 | ID | Requirement |
 |---|---|
-| FR-PB-1 | Formats: MP3 (MPEG-1/2 Layer III, CBR/VBR ≤ 320 kbps), AAC-LC (`.m4a`, `.aac`), Ogg Vorbis, FLAC (16-bit, ≤ 48 kHz — limits per VS1063A, OQ-2), WAV (16-bit PCM). |
+| FR-PB-1 | Formats: MP3 (MPEG-1/2 Layer III, CBR/VBR ≤ 320 kbps), AAC-LC (`.m4a`, `.aac`), Ogg Vorbis, FLAC (16/24-bit, ≤ 48 kHz, stereo), WAV (16-bit PCM). |
 | FR-PB-2 | Play / pause, next, previous (within the first 3 s → previous track, otherwise restart), scrub within a track. |
 | FR-PB-3 | Shuffle: Off / Songs / Albums. Repeat: Off / One / All. |
 | FR-PB-4 | Volume is digital (in the decoder), set with the wheel on Now Playing, ≥ 32 steps. |
@@ -148,7 +148,7 @@ stretch goal (OQ-4).
 | ID | Question | Blocks |
 |---|---|---|
 | OQ-1 | How to tell a USB host from a plain charger to enter Disk Mode automatically (bridge status pin, D+/D− sensing, or ask the user)? | FR-ST-3 |
-| OQ-2 | VS1063A FLAC limits and tone/EQ capabilities. | FR-PB-1, FR-PB-5 |
-| OQ-3 | LCD module bus mode: 8080 parallel vs SPI (affects the FPGA pin budget). | Pin budget |
+| OQ-2 | VS1063A tone / EQ capabilities (FLAC limits resolved: ≤ 48 kHz, ≤ 24-bit). | FR-PB-5 |
+| OQ-3 | ~~LCD module bus mode~~ — resolved: 8080 parallel (P-009). | — |
 | OQ-4 | Is gapless playback feasible with the streaming engine? | Stretch |
 | OQ-5 | Rev B mechanics (wheel geometry, button caps, display mounting) — after Rev A testing. | Rev B |

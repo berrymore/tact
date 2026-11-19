@@ -181,17 +181,27 @@ finish.
 | $0A | `VSC_CMD` | WO | — | 1 = SCI read, 2 = SCI write. |
 | $0C | `VSC_STAT` | RO / W1C | — | `[0] BUSY` (RO) `[1] DONE` (W1C) `[2] DREQ` (RO: live pin level). Polled; no interrupt. |
 
+SPI limits (VS1063A datasheet v1.33 §5.5, §8.4.4): SCI reads ≤ CLKI/7, SCI and SDI writes ≤ CLKI/4.
+After reset CLKI = XTALI = 12.288 MHz, so the reset dividers (1.6 MHz) are safe. After
+`SCI_CLOCKF = $B000` (CLKI = 49.152 MHz): set `VSC_SCIDIV = 2` (5.33 MHz ≤ 7.0 MHz) and
+`VSC_SDIDIV = 1` (8 MHz ≤ 12.3 MHz). Each `DREQ` high guarantees room for ≥ 32 bytes; the decoder's
+stream FIFO is 2048 bytes.
+
 The decoder's `XRESET` line is on the GPIO expander (P-003).
 
 ## 9. `LCDC` — $F000E0
 
 Write-only LCD port with a 512-byte FIFO. Each FIFO entry carries the byte and its command / data flag,
-so commands and pixel data stay in order. Whether the physical port is 8080 parallel or SPI is
-**pending OQ-3**; the programming model is the same for both.
+so commands and pixel data stay in order. The physical port is 8080 parallel (`/CS0`, `CD`, `/WR0`;
+`/WR1` = read strobe tied inactive) (P-009). An SPI build variant (UC1617s `SCK` = D0, `SDA` = D3) keeps
+the same programming model and reports itself in `CAP_SPI`.
+
+UC1617s display RAM: 128 rows × 32 bytes; each byte holds 4 horizontal pixels, the first pixel in
+bits 1–0 (with `MX = 0`), then bits 3–2, 5–4, 7–6.
 
 | Off | Name | Type | Reset | Description |
 |---|---|---|---|---|
-| $00 | `LCD_CTRL` | RW | 0 | `[0] EN`. `[15:8]` bus timing: write strobe width (parallel) or SPI divider, in SYSCLK cycles. |
+| $00 | `LCD_CTRL` | RW | `$3300` | `[0] EN`. `[15:12]` `/WR` low time and `[11:8]` `/WR` high time, in SYSCLK cycles (the reset value 3 + 3 = 187.5 ns per byte meets the module's ≥ 70 ns low, ≥ 65 ns high, ≥ 130 ns cycle). SPI variant: `[15:8]` = clock divider. |
 | $02 | `LCD_CMD` | PORT (WO) | — | Queue `[7:0]` as a command byte. |
 | $04 | `LCD_DATA` | PORT (WO) | — | Word write: queue two data bytes (high first). Byte write to the odd address: one data byte. Stalls while the FIFO is full (one byte frees every few hundred ns). |
 | $06 | `LCD_STAT` | RO | — | `[0] IDLE` (FIFO empty and bus idle) `[1] FULL` `[2] CAP_SPI` (1 if this build drives the LCD over SPI). |
@@ -302,7 +312,8 @@ Trace entry (64 bits, word 0 first):
 
 ## 16. Open items
 
-- `LCDC` physical port (OQ-3).
-- Default `STR_URGENT` and `STR_LOWAT` to be tuned in co-simulation against the decoder's real
-  stream-buffer size (verify).
+- Default `STR_URGENT` and `STR_LOWAT` to be tuned in co-simulation (4 KB FIFO + the decoder's
+  2048-byte stream FIFO).
+- Whether the LCD module really works in SPI mode is unverified (the module datasheet documents only
+  8080 / 6800); check on the breadboard (D-026) before using it.
 - Bus-timing details (wait states, `/DTACK` timing) go into `04-bus-timing.md`.
