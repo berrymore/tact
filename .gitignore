@@ -1,0 +1,32 @@
+# macOS
+.DS_Store
+
+# KiCad
+*-backups/
+_autosave-*
+*.kicad_prl
+fp-info-cache
+*.lck
+*.bak
+\#auto_saved_files\#
+
+# Build outputs
+build/
+*.o
+*.elf
+*.map
+*.lst
+
+# FPGA / simulation
+obj_dir/
+sim_build/
+*.vcd
+*.fst
+*.asc
+*.json.bak
+results.xml
+
+# Python
+__pycache__/
+*.pyc
+.venv/
