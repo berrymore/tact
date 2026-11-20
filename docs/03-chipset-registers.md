@@ -37,7 +37,7 @@ conformance tests check it (NFR-7). Change this document first, then the code.
 |---|---|---|---|---|
 | $00 | `SYS_ID` | RO | `$7AC7` | Chipset identification constant. |
 | $02 | `SYS_VER` | RO | — | `[15:8]` major, `[7:0]` minor version of the RTL. |
-| $04 | `SYS_CFG` | RW | `$0005` | `[0] OVL` boot overlay (reads of `$0xxxxx` come from the boot ROM). `[1] SRAM1_EN`. `[2] UPROT` user-mode access to the I/O window → `/BERR`. |
+| $04 | `SYS_CFG` | RW | `$0005` | `[0] OVL` boot overlay (reads of `$0xxxxx` come from the boot ROM). `[1] SRAM1_EN`. `[2] UPROT` user-mode access to the I/O page → `/BERR`. |
 | $06 | `SYS_CLKDIV` | RW | `$0000` | `[2:0]` CPU clock = SYSCLK / 2^(n+1): 0 = 16 MHz, 1 = 8, 2 = 4, 3 = 2, 4 = 1 MHz. The switch is glitch-free and takes effect at the next CPU clock edge. Values 5–7 are reserved. |
 | $08 | `SYS_BUSTO` | RW | `$0040` | `[7:0]` bus timeout in CPU clocks; 0 disables it. If no device acknowledges in time → `/BERR`. |
 | $0A | `SYS_RSTCAUSE` | W1C | — | `[0] POR` `[1] WATCHDOG` `[2] SOFT` `[3] DEBUG` (reset requested over the debug UART). |
@@ -63,7 +63,7 @@ Interrupt sources and their fixed levels:
 | 4 | `INPUT` | 2 |
 | 5 | `I2CM` (transfer done, or the shared external interrupt line: wheel, GPIO expander — VBUS / charger / Hold, fuel gauge) | 2 |
 | 6 | Watchdog pre-timeout (`TIMER`) | 7 |
-| 7 | Debug break (`UART` BREAK, when enabled) | 7 |
+| 7 | Debug break (`UART` BREAK, or a bus-tracer trigger with `TRC_CTRL.BREAK`) | 7 |
 | 8–15 | reserved | — |
 
 | Off | Name | Type | Reset | Description |
@@ -287,28 +287,39 @@ Stage-1 copy loop (illustrative):
 |---|---|---|---|---|
 | $00 | `DBG_MUX` | RW | 0 | Signal group on the 8-pin LA/PMOD header: 0 off (inputs), 1 CPU strobes, 2 SD SPI, 3 decoder SPI, 4 LCD port, 5 I²C + interrupt line, 6 UART + interrupt levels, 7 GPIO (from `DBG_GPIO`). Exact signal lists live in the RTL documentation. |
 | $02 | `DBG_GPIO` | RW | 0 | `[7:0]`: pin values driven in group 7; reads return the actual pin levels in every group. |
-| $04 | `DBG_LED` | RW | 0 | `[1:0]` the two FPGA-driven LEDs. |
-| $06 | `TRC_CTRL` | RW | 0 | `[0] ARM` (record into the ring). `[1] FROZEN` (RO). `[2] TRIG_ADDR` `[3] TRIG_BERR` `[4] TRIG_NMI` (trigger enables). `[5] TRIG_NOW` (WO: freeze now). `[15:8]` cycles to record after the trigger (0–127). |
-| $08 | `TRC_TADDR` | RW | 0 | Trigger address as the chipset sees it: `[15:12]` = A23–A20, `[8:0]` = A9–A1. |
-| $0A | `TRC_INDEX` | RW | 0 | `[6:0]` entry to read (0 = oldest); writing also resets the word counter. |
-| $0C | `TRC_DATA` | PORT (RO) | — | Reads the selected entry as four words, then advances to the next entry. |
-| $0E | `DBG_SCRATCH` | RW | 0 | Free for software (e.g. post codes visible in the bus trace). |
+| $04 | `DBG_LED` | RW | 0 | `[0]` the FPGA-driven status LED (the other Rev A LEDs are on the GPIO expander). |
+| $06 | `TRC_CTRL` | RW | 0 | `[0] ARM` (record into the ring). `[1] FROZEN` (RO). `[2] TRIG_ADDR` `[3] TRIG_BERR` `[4] TRIG_NMI` (trigger enables). `[5] TRIG_NOW` (WO: freeze now). `[7:6] KIND` for the address trigger: 0 any access, 1 data read, 2 data write, 3 program fetch (`FC = x10`). `[14:8]` cycles to record after the trigger (0–127). `[15] BREAK`: when the trigger fires, also raise the debug-break interrupt (INTC bit 7, level 7) — a hardware breakpoint / watchpoint. |
+| $08 | `TRC_TADDR_HI` | RW | 0 | Trigger address `[6:0]` = A23–A17. |
+| $0A | `TRC_TADDR_LO` | RW | 0 | Trigger address `[15:0]` = A16–A1. |
+| $0C | `TRC_TMASK_HI` | RW | 0 | Trigger mask `[6:0]` (1 = bit must match), A23–A17. All-zero mask with `TRIG_ADDR` = match any address. |
+| $0E | `TRC_TMASK_LO` | RW | 0 | Trigger mask `[15:0]`, A16–A1. A range of 2ⁿ bytes is a mask with the low n − 1 bits clear. |
+| $10 | `TRC_INDEX` | RW | 0 | `[6:0]` entry to read (0 = oldest); writing also resets the word counter. |
+| $12 | `TRC_DATA` | PORT (RO) | — | Reads the selected entry as four words, then advances to the next entry. |
+| $14 | `DBG_SCRATCH` | RW | 0 | Free for software (e.g. post codes visible in the bus trace). |
 
-Trace entry (64 bits, word 0 first):
+The address trigger matches when `(A23–A1 XOR TADDR) AND TMASK = 0` and the access kind matches.
+A `BREAK` interrupt is taken at the next instruction boundary after the matching cycle. For data
+triggers that is just after the accessing instruction (watchpoint semantics). A program-fetch trigger
+fires when the word is *fetched*: because of the 68000 prefetch this can be shortly before the
+instruction runs, and a word prefetched just before a taken branch fires although it never runs. The
+debug monitor compares the stacked PC with the trigger address to tell these cases apart.
+
+Trace entry (64 bits, word 0 first). The byte address of the cycle is
+`((W0 & $7F) << 17) | (W1 << 1)`:
 
 | Word | Bits | Field |
 |---|---|---|
-| 0 | `[15:0]` | CPU clocks since the previous entry (saturating) |
-| 1 | `[15:12]` | A23–A20 |
-| 1 | `[8:0]` | A9–A1 |
+| 0 | `[15]` | This is the trigger entry |
+| 0 | `[14]` | `/BERR` asserted |
+| 0 | `[13]` | R/W (1 = read) |
+| 0 | `[12]` | `UDS` active |
+| 0 | `[11]` | `LDS` active |
+| 0 | `[10:8]` | FC2–FC0 |
+| 0 | `[6:0]` | A23–A17 |
+| 1 | `[15:0]` | A16–A1 |
 | 2 | `[15:0]` | D15–D0 (as driven or sampled) |
-| 3 | `[2:0]` | FC2–FC0 |
-| 3 | `[3]` | R/W (1 = read) |
-| 3 | `[4]` | `UDS` active |
-| 3 | `[5]` | `LDS` active |
-| 3 | `[6]` | `/BERR` asserted |
-| 3 | `[10:8]` | Wait states inserted (saturating at 7) |
-| 3 | `[15]` | This is the trigger entry |
+| 3 | `[15:13]` | Wait states inserted (saturating at 7) |
+| 3 | `[12:0]` | CPU clocks since the previous entry (saturating at 8191) |
 
 ## 16. Open items
 

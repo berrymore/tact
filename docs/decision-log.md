@@ -4,8 +4,8 @@ Every design decision, with the reason it was made and what it replaced. Entries
 a reversed decision is marked **Superseded** and points to its replacement.
 
 - `D-nnn` — **decided** by the project owner (initial design review, 2026-11-20).
-- `P-nnn` — **proposed** while writing the specifications. It shapes the docs now, but it stays
-  open until the owner accepts it; the owner may still change it.
+- `P-nnn` — **proposed** while writing the specifications, then reviewed by the owner. Accepted
+  proposals keep their `P` number so that references in the docs stay valid.
 
 ## Decided
 
@@ -39,12 +39,15 @@ a reversed decision is marked **Superseded** and points to its replacement.
 | D-026 | Validate peripherals on an iCE40 dev board with breakout modules (decoder, microSD, the real LCD) during the simulation phase. Optional. | Proves the LCD / SD / decoder RTL on real silicon before Rev A; tool practice. | Going straight from simulation to Rev A. |
 | D-027 | Conversation in Russian; every repository artifact in English. | Public repository. | — |
 
-## Proposed (pending owner review)
+## Proposals
+
+All of P-001…P-009 were **accepted** on 2026-11-20 (the owner delegated the call). P-002 was revised
+at acceptance: see the entry.
 
 | ID | Proposal | Why | Affects |
 |---|---|---|---|
 | P-001 | **Two-stage boot.** Stage 1: a ≤ 512 B ROM in FPGA block RAM copies **tactboot** from the SPI configuration flash into SRAM. tactboot (C) then loads `FIRMWARE.BIN` from the card. Refines D-014. | The FPGA has only 10 KB of block RAM, and a FAT + SD + LCD loader does not fit. The flash has megabytes free. The device stays unbrickable for anything stored on the card. | Memory map, boot ROM, `FLASH` block |
-| P-002 | The chipset sees only `A1–A9` and `A20–A23` (I/O page mirrored inside `$Fxxxxx`); no bus mastering (`/BR` tied inactive). | FPGA pin budget (~107 I/O). DMA does not need the CPU bus because STREAM runs SD → decoder directly. | Memory map, schematic |
+| P-002 | The chipset sees the **whole** address bus `A1–A23` (inputs only) and decodes it fully; no bus mastering (`/BR` tied inactive). `A10–A19` are the last pins to reclaim if the FPGA pin budget runs short; the I/O page then mirrors inside `$Fxxxxx`. *Revised at acceptance; the first draft gave the chipset only `A1–A9` + `A20–A23`.* | Full addresses make the bus tracer show real addresses and act as a hardware breakpoint — the main debugging tool without an oscilloscope (NFR-9). The pin estimate (106 of 107) allows it once the LEDs move to the expander. DMA does not need the CPU bus because STREAM runs SD → decoder directly. | Memory map, `DBG`, schematic |
 | P-003 | Slow signals (Hold, charger status, card detect, resets, enables, 2 LEDs) go through an I²C GPIO expander. | Frees ~10 FPGA pins. | Schematic, `I2CM` |
 | P-004 | Clocking: 32 MHz oscillator = SYSCLK; CPU clock = SYSCLK / 2 (16 MHz), scalable at run time; no PLL needed. | The 68000 needs a ≈ 50 % duty cycle; generating it in the FPGA makes bus timing synchronous and known. | Bus timing, power |
 | P-005 | STREAM engine: a descriptor ring of sector extents, 4 KB FIFO, `DREQ`-paced 32-byte SDI bursts; the firmware never writes to the card while streaming. | The CPU never touches audio bytes; the small FIFO tolerates read latency but not SD write busy times. | Registers, firmware |

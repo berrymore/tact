@@ -1,8 +1,7 @@
 # 01 — System Architecture
 
-Status: **Draft** · Updated: 2026-11-20 · Items marked **(verify)** wait for a datasheet check;
-items marked `P-nnn` are proposals made while writing these docs and still need the owner's review
-(see [decision-log.md](decision-log.md)).
+Status: **Draft** · Updated: 2026-11-20 · `D-nnn` / `P-nnn` refer to
+[decision-log.md](decision-log.md).
 
 ## 1. Overview
 
@@ -96,16 +95,46 @@ flowchart LR
 - **SRAM.** Address `A1–A19` and data `D0–D15` go directly from the CPU to the SRAM; `/UB` and `/LB` come
   straight from `/UDS` and `/LDS`. The chipset drives `/CE0`, `/CE1`, `/OE`, `/WE`. Target: zero wait
   states for SRAM (cycle timing in the bus-timing doc).
-- **What the chipset sees (P-002).** `A1–A9`, `A20–A23`, `D0–D15`, `/AS`, `/UDS`, `/LDS`, `R/W`,
-  `FC0–FC2`. It drives `/DTACK`, `/BERR`, `/IPL0–2`, `/AVEC` (the EC000 core's autovector input,
-  which replaces `/VPA`; `E` and `/VMA` do not exist), `/RESET`+`/HALT` and `CLK`.
+- **What the chipset sees (P-002).** The whole bus as inputs: `A1–A23`, `D0–D15`, `/AS`, `/UDS`,
+  `/LDS`, `R/W`, `FC0–FC2`. It drives `/DTACK`, `/BERR`, `/IPL0–2`, `/AVEC` (the EC000 core's
+  autovector input, which replaces `/VPA`; `E` and `/VMA` do not exist), `/RESET`+`/HALT` and `CLK`.
+  Full addresses give exact decoding (no mirrors; stray accesses fault) and let the bus tracer
+  record every cycle's real address and act as a hardware breakpoint / watchpoint.
 - **No bus mastering.** The EC000 core has only `/BR` and `/BG` (no `/BGACK`). `/BR` is tied
   inactive; the chipset never takes the bus. Its DMA (STREAM) runs entirely between its own
   peripherals.
 
+### FPGA pin budget (estimate — the exact assignment is doc 07)
+
+| Group | Pins |
+|---|---|
+| CPU data `D0–D15` | 16 |
+| CPU address `A1–A23` | 23 |
+| CPU inputs: `/AS`, `/UDS`, `/LDS`, `R/W`, `FC0–FC2` | 7 |
+| CPU outputs: `/DTACK`, `/BERR`, `/AVEC`, `/IPL0–2`, `CLK`, `/RESET`+`/HALT` | 8 |
+| SRAM: `/CE0`, `/CE1`, `/OE`, `/WE` | 4 |
+| Configuration / boot flash (SPI) | 4 |
+| microSD (SPI mode, through the mux) | 4 |
+| VS1063A: `SCLK`, `SI`, `SO`, `XCS`, `XDCS`, `DREQ` | 6 |
+| LCD 8080: `D0–D7`, `CD`, `/CS0`, `/WR0` (P-009) | 11 |
+| I²C: `SCL`, `SDA`, shared `/INT` | 3 |
+| UART (debug console) | 2 |
+| Buttons | 5 |
+| Piezo, backlight PWM, power-latch hold | 3 |
+| 32 MHz clock input (global buffer pin) | 1 |
+| LA/PMOD debug header | 8 |
+| Status LED | 1 |
+| **Total** | **106 of 107** |
+
+Everything slow (resets, enables, card detect, Hold, charger status, the other LEDs) is on the I²C
+expander (P-003); `CDONE` drives its own LED. If the exact count runs short, pins are reclaimed in
+this order: buttons move to a second I²C expander (5 pins); the LCD switches to SPI once verified
+(7 pins, P-009); `A10–A19` come off the chipset and the I/O page mirrors (10 pins). Rev B has no
+debug header, which frees 8 more.
+
 ## 4. Chipset blocks
 
-All registers are 16 bits wide, live in the I/O window at `$F00000` and are specified in
+All registers are 16 bits wide, live in the I/O page at `$F00000` and are specified in
 [03-chipset-registers.md](03-chipset-registers.md). Blocks:
 
 | Block | Role |
@@ -123,7 +152,7 @@ All registers are 16 bits wide, live in the I/O window at `$F00000` and are spec
 | `PWR` | Power-latch hold output, power-off request. |
 | `AUX` | Piezo tone/click generator; backlight PWM. |
 | `FLASH` | SPI master to the configuration flash, including an auto-incrementing read port used by the stage-1 boot ROM. |
-| `DBG` | Debug mux to the LA/PMOD header; bus tracer (last 128 bus cycles); scratch registers. |
+| `DBG` | Debug mux to the LA/PMOD header; bus tracer (last 128 bus cycles, full addresses) with an address trigger that doubles as a hardware breakpoint; status LED; scratch registers. |
 | Boot ROM | 512 bytes of EBR, visible at `$F00200` and, while `OVL=1`, at `$000000` (reads only). |
 
 ### EBR (block RAM) budget — 20 blocks × 512 B
@@ -213,7 +242,7 @@ Autovectored, one fixed level per source (vector = 24 + level):
 
 | Level | Sources |
 |---|---|
-| 7 (NMI) | Debug break (UART BREAK on the debug port), watchdog pre-timeout |
+| 7 (NMI) | Debug break (UART BREAK on the debug port, or a bus-tracer breakpoint), watchdog pre-timeout |
 | 6 | STREAM (ring low, end of track, error) |
 | 5 | SDC (CPU transaction done / error) |
 | 4 | TIMER tick |
@@ -296,9 +325,12 @@ any difference between the C models and the RTL fails CI (NFR-7).
   channel B is the UART console and firmware upload path.
 - `DBG` mux: any 8 internal or external signals onto the 2×6 LA/PMOD header (a cheap 8-channel
   FX2 analyser + PulseView is enough).
-- Bus tracer: the last 128 bus cycles (address bits seen by the chipset, data, strobes, FC,
-  timestamp) frozen on a trigger (address match, `/BERR`, NMI) and read back over UART.
-- INA226 on the battery line; test points on every rail; 4 LEDs (2 on FPGA pins, 2 on the expander).
+- Bus tracer: the last 128 bus cycles (full address, data, strobes, FC, wait states, timestamp)
+  frozen on a trigger (masked address match on any access / read / write / program fetch, `/BERR`,
+  NMI) and read back over UART. With `BREAK` set the trigger also raises a level-7 interrupt, so the
+  firmware's debug monitor gets hardware breakpoints and watchpoints.
+- INA226 on the battery line; test points on every rail; LEDs: `CDONE`, one FPGA status LED, the
+  rest on the expander.
 
 ## 13. Rev A vs Rev B
 
@@ -318,5 +350,5 @@ any difference between the C models and the RTL fails CI (NFR-7).
 | CPU is NXP-obsolete | Rochester stock is large; buy spares early in the hardware phase. |
 | LCD module stock is small (≈ 65 at the vendor) | Buy 3 at the start of the simulation phase; keep alternative 128×128 modules on file. |
 | First board, no oscilloscope | Built-in instrumentation, chipset self-test without the CPU, conservative LDO power design, breadboard validation of peripherals (D-026). |
-| FPGA pin budget is tight (107 I/O including the 4 configuration-SPI pins) | Address subset, I²C expander for slow signals (P-002, P-003); the LCD's SPI mode is a fallback that frees 7 pins (P-009). |
+| FPGA pin budget is tight (≈ 106 of 107 I/O, §3) | I²C expander for slow signals (P-003); ordered reclaim list: buttons to a second expander (5), LCD in SPI mode (7, P-009), `A10–A19` (10, P-002). |
 | SD write latency vs. small FIFO | No writes while streaming (FR-ST-5). |

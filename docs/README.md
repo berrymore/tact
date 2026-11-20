@@ -24,5 +24,6 @@ Read in order. Status is per document.
 
 - Hex addresses use the Motorola `$` prefix; values are big-endian.
 - Signal names: active-low signals have a leading `/` (`/DTACK`).
-- `D-nnn` = decided, `P-nnn` = proposed and awaiting review, `OQ-n` = open question,
-  **(verify)** = waiting for a datasheet check.
+- `D-nnn` = decided in the design review, `P-nnn` = proposed while writing the specs (status in the
+  [decision log](decision-log.md)), `OQ-n` = open question, **(verify)** = waiting for a datasheet
+  check.

@@ -1,28 +1,29 @@
 # 02 — Memory Map and Storage Layouts
 
-Status: **Draft** · Updated: 2026-11-20 · Depends on P-001 (two-stage boot) and P-002 (address
-subset); see [decision-log.md](decision-log.md).
+Status: **Draft** · Updated: 2026-11-20 · Depends on P-001 (two-stage boot) and P-002 (chipset
+address decoding); see [decision-log.md](decision-log.md).
 
 All multi-byte values are **big-endian** (68000 native).
 
 ## 1. CPU address space (24-bit, 16 MB)
 
-The chipset decodes `A23–A20` (sixteen 1 MB regions) plus `A1–A9` inside the I/O region. `FC0–FC2`
-qualify every access.
+The chipset sees the whole address bus `A1–A23` (P-002) and decodes it fully: every address outside
+the regions below raises `/BERR`. `FC0–FC2` qualify every access.
 
 | Range | Size | Region | Notes |
 |---|---|---|---|
 | `$000000–$0FFFFF` | 1 MB | **SRAM0** | While `SYS_CFG.OVL = 1`, **reads** anywhere in this region return boot-ROM contents (mirrored); writes still go to SRAM0. |
 | `$100000–$1FFFFF` | 1 MB | **SRAM1** (optional) | Decoded only when `SYS_CFG.SRAM1_EN = 1`; otherwise `/BERR`. |
 | `$200000–$EFFFFF` | 13 MB | unmapped | `/BERR`. |
-| `$F00000–$FFFFFF` | 1 MB | **I/O window** | Only `A1–A9` are decoded, so a 1 KB I/O page repeats throughout the region. Software must use the canonical addresses below. |
+| `$F00000–$F003FF` | 1 KB | **I/O page** | Chipset registers and the boot ROM (§2). |
+| `$F00400–$FFFFFF` | ≈ 1 MB | unmapped | `/BERR`. If the pin budget ever forces `A10–A19` off the chipset (P-002 fallback), the I/O page mirrors through `$Fxxxxx` instead; software uses only the canonical addresses in §2, so it is unaffected. |
 
 CPU-space cycles (`FC = 111`, i.e. interrupt acknowledge) are never treated as memory accesses: the
 chipset answers them with an autovector.
 
 ### Access protection
 
-- The I/O window is accessible only in supervisor mode (`FC = 101` data, `110` program). A user-mode
+- The I/O page is accessible only in supervisor mode (`FC = 101` data, `110` program). A user-mode
   access raises `/BERR` while `SYS_CFG.UPROT = 1` (reset default).
 - Any access that is not acknowledged within the bus timeout (`SYS_BUSTO`, default 64 CPU clocks)
   raises `/BERR`. The bus tracer freezes on `/BERR` when armed to do so.

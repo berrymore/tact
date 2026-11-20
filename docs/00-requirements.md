@@ -124,7 +124,7 @@ stretch goal (OQ-4).
 |---|---|
 | FR-DV-1 | Debug USB-C (FT2232HL): FPGA configuration-flash programming (iceprog-compatible) and a UART console. |
 | FR-DV-2 | UART firmware upload into RAM and run, without touching the card. |
-| FR-DV-3 | FPGA debug mux to an 8-signal logic-analyser / PMOD header; bus tracer holding recent 68000 bus cycles. |
+| FR-DV-3 | FPGA debug mux to an 8-signal logic-analyser / PMOD header; bus tracer holding recent 68000 bus cycles with full addresses; hardware breakpoint / watchpoint through the tracer trigger. |
 | FR-DV-4 | Battery current monitor (INA226) readable by firmware. |
 | FR-DV-5 | Test points on every power rail. |
 
