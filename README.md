@@ -16,7 +16,8 @@ A pocket music player in the spirit of 2001 — built as a tiny single-board com
 
 ## Documentation
 
-Start with [`docs/README.md`](docs/README.md). Key documents:
+Start with [`docs/README.md`](docs/README.md); progress and next steps are in [`ROADMAP.md`](ROADMAP.md).
+Key documents:
 
 | Document | What it covers |
 |---|---|
